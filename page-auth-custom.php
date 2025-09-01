@@ -4,23 +4,99 @@
  * Template Post Type: page
  */
 
+global $wpdb;
+
+// if (isset($_POST['wp_register'])) {
+//     if (!isset($_POST['custom_register_nonce']) || !wp_verify_nonce($_POST['custom_register_nonce'], 'custom_register_action')) {
+//         die("Security check failed.");
+//     }
+
+//     $user_data = array(
+//         'user_login' => sanitize_user($_POST['reg_username']),
+//         'user_email' => sanitize_email($_POST['reg_email']),
+//         'user_pass'  => $_POST['reg_password']
+//     );
+
+//     $user_id = wp_insert_user($user_data);
+
+//     if (!is_wp_error($user_id)) {
+//         echo "<p style='color:green;'>Registration successful! You can login now.</p>";
+//     } else {
+//         echo "<p style='color:red;'>Error: " . $user_id->get_error_message() . "</p>";
+//     }
+// }
+
+// if (isset($_POST['wp_login'])) {
+//     if (!isset($_POST['custom_login_nonce']) || !wp_verify_nonce($_POST['custom_login_nonce'], 'custom_login_action')) {
+//         die("Security check failed.");
+//     }
+
+//     $creds = array(
+//         'user_login'    => sanitize_user($_POST['log']),
+//         'user_password' => $_POST['pwd'],
+//         'remember'      => true,
+//     );
+
+//     $user = wp_signon($creds, false);
+
+//     if (!is_wp_error($user)) {
+//         wp_redirect(admin_url());
+//         exit;
+//     } else {
+//         echo "<p style='color:red;'>Error: " . $user->get_error_message() . "</p>";
+//     }
+// }
+
 if (isset($_POST['wp_register'])) {
     if (!isset($_POST['custom_register_nonce']) || !wp_verify_nonce($_POST['custom_register_nonce'], 'custom_register_action')) {
-        die("Security check failed.");
+        die("security check failed");
     }
 
-    $user_data = array(
-        'user_login' => sanitize_user($_POST['reg_username']),
-        'user_email' => sanitize_email($_POST['reg_email']),
-        'user_pass'  => $_POST['reg_password']
+    $username = sanitize_user($_POST['reg_username']);
+    $email = sanitize_user($_POST['reg_email']);
+    $password = $_POST['reg_password'];
+
+    $user_exists = $wpdb->get_var(
+        $wpdb->prepare("SELECT ID FROM $wpdb->users WHERE user_login=%s and user_email=%s", $username, $email)
     );
-
-    $user_id = wp_insert_user($user_data);
-
-    if (!is_wp_error($user_id)) {
-        echo "<p style='color:green;'>Registration successful! You can login now.</p>";
+    if ($user_exists) {
+        echo "<p style='color:red;'>Username or email already exists</p>";
     } else {
-        echo "<p style='color:red;'>Error: " . $user_id->get_error_message() . "</p>";
+        $hashed_password = wp_hash_password($password);
+        $wpdb->insert(
+            $wpdb->users,
+            array(
+                'user_login' => $username,
+                'user_pass' => $hashed_password,
+                'user_email' => $email,
+                'user_registered' => current_time('mysql')
+            ),
+            array('%s', '%s', '%s', '%s')
+        );
+        $user_id = $wpdb->insert_id;
+        if ($user_id) {
+            $wpdb->insert(
+                $wpdb->usermeta,
+                array(
+                    'user_id'    => $user_id,
+                    'meta_key'   => $wpdb->prefix . 'capabilities',
+                    'meta_value' => serialize(array('subscriber' => true))
+                ),
+                array('%d','%s','%s')
+            );
+
+            $wpdb->insert(
+                $wpdb->usermeta,
+                array(
+                    'user_id'    => $user_id,
+                    'meta_key'   => $wpdb->prefix . 'user_level',
+                    'meta_value' => 0
+                ),
+                array('%d','%s','%d')
+            );
+
+            echo "<p style='color:green;'>Registration successful! You can login now.</p>";
+        }
     }
 }
 
@@ -29,19 +105,25 @@ if (isset($_POST['wp_login'])) {
         die("Security check failed.");
     }
 
-    $creds = array(
-        'user_login'    => sanitize_user($_POST['log']),
-        'user_password' => $_POST['pwd'],
-        'remember'      => true,
+    $username = sanitize_user($_POST['log']);
+    $password = $_POST['pwd'];
+
+    $user = $wpdb->get_row(
+        $wpdb->prepare("SELECT * FROM $wpdb->users WHERE user_login = %s OR user_email = %s", $username, $username)
     );
 
-    $user = wp_signon($creds, false);
+    if ($user && wp_check_password($password, $user->user_pass, $user->ID)) {
+        wp_set_current_user($user->ID);
+        wp_set_auth_cookie($user->ID);
 
-    if (!is_wp_error($user)) {
-        wp_redirect(admin_url());
+        if (in_array('administrator', (array) get_userdata($user->ID)->roles)) {
+            wp_redirect(admin_url());
+        } else {
+            wp_redirect(home_url());
+        }
         exit;
     } else {
-        echo "<p style='color:red;'>Error: " . $user->get_error_message() . "</p>";
+        echo "<p style='color:red;'>Invalid username or password.</p>";
     }
 }
 ?>
